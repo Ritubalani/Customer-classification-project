@@ -1,0 +1,150 @@
+#Load data
+donor <- read_excel("donor_raw.xlsx")
+donor$CLUSTER_CODE <- NULL
+donor$CONTROL_NUMBER <- NULL
+donor$TARGET_D <- NULL
+#Describe data
+str(donor)
+describe(donor)
+#Clean data
+describe(donor$DONOR_GENDER)
+donor$DONOR_GENDER <- replace(donor$DONOR_GENDER, donor$DONOR_GENDER=='A', 'U')
+describe(donor$DONOR_GENDER)
+describe(donor$SES)
+donor$SES <- replace(donor$SES, donor$SES=='?', NA)
+describe(donor$SES)
+describe(donor$URBANICITY)
+donor$URBANICITY <- replace(donor$URBANICITY, donor$URBANICITY=='?', NA)
+describe(donor$URBANICITY)
+#Partition data
+trainfrac <- 0.7
+valfrac <- 0.15
+testfrac <- 0.15
+sampleSizeTraining <- floor(trainfrac * nrow(donor))
+sampleSizeValidation <- floor(valfrac * nrow(donor))
+sampleSizeTest <- floor(testfrac * nrow(donor))
+indicesTraining <- sort(sample(seq_len(nrow(donor)), size=sampleSizeTraining))
+indicesNotTraining <- setdiff(seq_len(nrow(donor)), indicesTraining)
+indicesValidation <- sort(sample(indicesNotTraining, size=sampleSizeValidation))
+indicesTest <- setdiff(indicesNotTraining, indicesValidation)
+donortrain <- donor[indicesTraining, ]
+donorval <- donor[indicesValidation, ]
+donortest <- donor[indicesTest, ]
+#Create maximal decision tree
+donormaxtree <- rpart(TARGET_B ~ ., data = donortrain, method = "class", control =
+ rpart.control(cp = 0.0001))
+donormaxtree
+#minsplit: min obs in a leaf in order to attempt split
+#minbucket: min obs in a leaf
+#cp: complexity parameter
+#maxcompete: the number of competitor splits retained in the output
+#maxsurrogate: the number of surrogate splits retained in the output
+#usesurrogate: how to use surrogates in the splitting process
+#xval: number of cross-validations.
+#surrogatestyle: controls the selection of a best surrogate
+#maxdepth: max depth of any node of the final tree
+printcp(donormaxtree)
+plotcp(donormaxtree, upper = "splits")
+#fancyRpartPlot(donormaxtree)
+#Evaluate max tree performance
+donortrain <- testModelPerformance(donormaxtree, donortrain, donortrain$TARGET_B)
+donorval <- testModelPerformance(donormaxtree, donorval, donorval$TARGET_B)
+#Create optimal decision tree
+mincp = donormaxtree$cptable[which.min(donormaxtree$cptable[,"xerror"]),"CP"]
+mincp = 0.0011 #chosen based on plotcp
+donoropttree <- prune(donormaxtree, mincp)
+printcp(donoropttree)
+## replacing again wiht rpart.plot
+rpart.plot(donoropttree)
+#fancyRpartPlot(donoropttree)
+#Evaluate opt tree performance
+donortrain <- testModelPerformance(donoropttree, donortrain, donortrain$TARGET_B)
+donorval <- testModelPerformance(donoropttree, donorval, donorval$TARGET_B)
+#Build logistic regression
+#Replace missing numeric values with mean
+donortrain$MONTHS_SINCE_LAST_PROM_RESP <- replace(donortrain$MONTHS_SINCE_LAST_PROM_RESP,
+ is.na(donortrain$MONTHS_SINCE_LAST_PROM_RESP),
+ mean(na.omit(donortrain$MONTHS_SINCE_LAST_PROM_RESP)))
+donortrain$DONOR_AGE <- replace(donortrain$DONOR_AGE, is.na(donortrain$DONOR_AGE),
+ mean(na.omit(donortrain$DONOR_AGE)))
+#Replace missing categorical values with most frequent value
+
+sescount <- count(donortrain, c('SES'))
+sesmax <- sescount[which.max(sescount$freq), c('SES')]
+donortrain$SES <- replace(donortrain$SES, is.na(donortrain$SES), sesmax)
+urbcount <- count(donortrain, c('URBANICITY'))
+urbmax <- urbcount[which.max(urbcount$freq), c('URBANICITY')]
+donortrain$URBANICITY <- replace(donortrain$URBANICITY, is.na(donortrain$URBANICITY),
+urbmax)
+#Remove variables missing too much data to impute
+donortrain$WEALTH_RATING <- NULL
+donortrain$INCOME_GROUP <- NULL
+donorlogit <- glm(TARGET_B ~., data = donortrain, family = binomial(link = "logit"))
+summary(donorlogit)
+donorlogit <- glm(TARGET_B ~ IN_HOUSE + SES + MEDIAN_HOME_VALUE + PEP_STAR +
+ FREQUENCY_STATUS_97NK + RECENT_CARD_RESPONSE_COUNT, data = donortrain, family =
+ binomial(link = "logit"))
+summary(donorlogit)
+confint.default(donorlogit) #Build confidence intervals
+exp(coef(donorlogit)) #Calculate odds ratio
+#Calculate Chi-Square
+devdiff <- with(donorlogit, null.deviance - deviance) #difference in deviance between null
+ and this model
+dofdiff <- with(donorlogit, df.null - df.residual) #difference in degrees of freedom
+ between null and this model
+pval <- pchisq(devdiff, dofdiff, lower.tail = FALSE )
+paste("Chi-Square: ", devdiff, " df: ", dofdiff, " p-value: ", pval)
+#Calculate Psuedo R2
+donortrain$probdonate <- predict(donorlogit, newdata = donortrain, type = "response")
+resid.dev <- 2 * llh(donortrain$TARGET_B, donortrain$probdonate)
+null.dev <- 2 * llh(donortrain$TARGET_B, mean(donortrain$TARGET_B))
+pr2 <- 1-(resid.dev/null.dev)
+paste("Psuedo R2: ", pr2)
+#Evaluate logit performance
+donortrain$logitpred <- round(donortrain$probdonate)
+#Replace missing numeric values with mean
+donorval$MONTHS_SINCE_LAST_PROM_RESP <- replace(donorval$MONTHS_SINCE_LAST_PROM_RESP,
+ is.na(donorval$MONTHS_SINCE_LAST_PROM_RESP),
+ mean(na.omit(donorval$MONTHS_SINCE_LAST_PROM_RESP)))
+donorval$DONOR_AGE <- replace(donorval$DONOR_AGE, is.na(donorval$DONOR_AGE),
+ mean(na.omit(donorval$DONOR_AGE)))
+#Replace missing categorical values with most frequent value
+sescount <- count(donorval, c('SES'))
+sesmax <- sescount[which.max(sescount$freq), c('SES')]
+donorval$SES <- replace(donorval$SES, is.na(donorval$SES), sesmax)
+
+urbcount <- count(donorval, c('URBANICITY'))
+urbmax <- urbcount[which.max(urbcount$freq), c('URBANICITY')]
+donorval$URBANICITY <- replace(donorval$URBANICITY, is.na(donorval$URBANICITY), urbmax)
+#Remove variables missing too much data to impute
+donorval$WEALTH_RATING <- NULL
+donorval$INCOME_GROUP <- NULL
+donorval$probdonate <- predict(donorlogit, newdata = donorval, type = "response")
+donorval$logitpred <- round(donorval$probdonate)
+donortrain <- testModelPerformance(donorlogit, donortrain, donortrain$TARGET_B,
+ donortrain$logitpred)
+donorval <- testModelPerformance(donorlogit, donorval, donorval$TARGET_B,
+ donorval$logitpred)
+#Compare Three Models Against Each Other Using Test Data
+donortest <- testModelPerformance(donormaxtree, donortest, donortest$TARGET_B)
+donortest <- testModelPerformance(donoropttree, donortest, donortest$TARGET_B)
+#Replace missing numeric testues with mean
+donortest$MONTHS_SINCE_LAST_PROM_RESP <- replace(donortest$MONTHS_SINCE_LAST_PROM_RESP,
+ is.na(donortest$MONTHS_SINCE_LAST_PROM_RESP),
+ mean(na.omit(donortest$MONTHS_SINCE_LAST_PROM_RESP)))
+donortest$DONOR_AGE <- replace(donortest$DONOR_AGE, is.na(donortest$DONOR_AGE),
+ mean(na.omit(donortest$DONOR_AGE)))
+#Replace missing categorical testues with most frequent testue
+sescount <- count(donortest, c('SES'))
+sesmax <- sescount[which.max(sescount$freq), c('SES')]
+donortest$SES <- replace(donortest$SES, is.na(donortest$SES), sesmax)
+urbcount <- count(donortest, c('URBANICITY'))
+urbmax <- urbcount[which.max(urbcount$freq), c('URBANICITY')]
+donortest$URBANICITY <- replace(donortest$URBANICITY, is.na(donortest$URBANICITY), urbmax)
+#Remove variables missing too much data to impute
+donortest$WEALTH_RATING <- NULL
+donortest$INCOME_GROUP <- NULL
+donortest$probdonate <- predict(donorlogit, newdata = donortest, type = "response")
+donortest$logitpred <- round(donortest$probdonate)
+donortest <- testModelPerformance(donorlogit, donortest, donortest$TARGET_B,
+ donortest$logitpred)
