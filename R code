@@ -1,0 +1,218 @@
+setwd("/Users/ritubalani/Downloads")
+set.seed(42)
+#libraries
+library(Hmisc)
+library(rpart)
+library(rpart.plot)
+library(plyr)
+library("VIM")
+#Load Data
+organics <- read.csv("organics.csv", na.strings=c("","NA"), header = TRUE)
+organics$ID <- NULL
+organics$DemCluster <- NULL # model role is rejected, not used in the analysis
+organics$TargetAmt <- NULL # model role is rejected, not used in the analysis
+#Examine and describe the data
+str(organics)
+describe(organics)
+table(organics$TargetBuy)
+head(organics)
+aggr(organics)
+##1.Data cleaning for DemAffl
+x <- organics$DemAffl
+describe(x)
+x <- replace(x,x==0,1) #grade is from scale 1 to 30, 0 is wrong input replaced with nearest
+ value
+x <- replace(x,x==31,30)#grade is from scale 1 to 30, 31 is wrong input replaced with
+ nearest value
+x<- replace(x,x==34,30)#grade is from scale 1 to 30, 34 is wrong input replaced with
+ nearest value
+#plot histogram
+hist(x, col = "Orange", main = "Histogram for DemAffl")
+#since histogram is a normal distribution, impute mean
+x[is.na(x)] <- mean(x, na.rm = TRUE)
+organics$DemAffl <- x
+describe(organics$DemAffl)
+##2. Data cleaning for DemClusterGroup
+c <- organics$DemClusterGroup
+describe(c)
+c <- replace(c, is.na(c),'U')
+describe(c)
+organics$DemClusterGroup <- c
+##3. Data cleaning for DemGender
+
+g <- organics$DemGender
+describe(g)
+g <- replace(g, is.na(g),'U')
+describe(g)
+organics$DemGender <- g
+##4. Data cleaning for DemRegion
+describe(organics$DemReg)
+#Replace missing categorical values with most frequent value
+rcount <- count(organics, c('DemReg'))
+DemRegmax <- rcount[which.max(rcount$freq), c('DemReg')]
+organics$DemReg <- replace(organics$DemReg, is.na(organics$DemReg), DemRegmax)
+describe(organics$DemReg)
+##5. Data cleaning for DemTVReg
+describe(organics$DemTVReg)
+#Replace missing categorical values with most frequent value
+tvrcount <- count(organics, c('DemTVReg'))
+DemTVRegmax <- tvrcount[which.max(tvrcount$freq), c('DemTVReg')]
+organics$DemTVReg <- replace(organics$DemTVReg, is.na(organics$DemTVReg), DemTVRegmax)
+describe(organics$DemTVReg)
+##6. Data cleaning for PromTime
+describe(organics$PromTime)
+#Impute missing values using linear model for prediction
+prom_model1 <- lm(PromTime~TargetBuy+PromClass+PromSpend,data = organics)
+summary(prom_model1)
+prom_model2 <-
+ lm(PromTime~TargetBuy+PromClass+PromSpend+DemAffl+DemAge+DemClusterGroup+DemGender+DemReg+
+ DemTVReg,data = organics)
+summary(prom_model2)
+prom_model3 <- lm(PromTime~PromClass+PromSpend+DemAge+DemClusterGroup+DemTVReg,data =
+ organics)
+summary(prom_model3)
+prom_model4 <- lm(PromTime~PromClass+PromSpend+DemAge+DemClusterGroup,data = organics)
+summary(prom_model4)
+for(i in 1:nrow(organics)){
+  if(is.na(organics[i, "PromTime"])){
+    organics[i, "PromTime"] = predict(prom_model4, newdata = organics[i, ])
+  }
+}
+describe(organics$PromTime)
+
+##7. Data cleaning for DemAge
+describe(organics$DemAge)
+#Impute missing values using linear model for prediction
+age_model1 <-
+ lm(DemAge~DemAffl+DemClusterGroup+DemGender+DemReg+DemTVReg+TargetBuy+PromTime,data =
+ organics)
+summary(age_model1)
+age_model2 <- lm(DemAge~DemAffl+DemClusterGroup+DemReg+TargetBuy+PromTime,data = organics)
+summary(age_model2)
+for(i in 1:nrow(organics)){
+  if(is.na(organics[i, "DemAge"])){
+    organics[i, "DemAge"] = predict(age_model2, newdata = organics[i, ])
+  }
+}
+describe(organics$DemAge)
+#Remove observations with missing values after imputions using linear models for prediction
+#remove old variables not in use first
+sum(is.na(organics))
+organics <- na.omit(organics)
+#Randomize data
+rand <- runif(nrow(organics))
+organics.rand <- organics[order(rand), ]
+#Partition data
+trainfrac <- 0.5
+sampleSizeTraining <- floor(trainfrac * nrow(organics))
+indicesTraining <- sort(sample(seq_len(nrow(organics)), size=sampleSizeTraining))
+indicesTest <- setdiff(seq_len(nrow(organics)), indicesTraining)
+organics_train <- organics[indicesTraining, ]
+organics_test <- organics[indicesTest, ]
+#Build decision tree
+organics_traintree <- rpart(TargetBuy~.,data = organics_train,method = "class")
+organics_traintree
+rpart.plot(organics_traintree)
+printcp(organics_traintree)
+plotcp(organics_traintree,upper="splits")
+#Create optimal decision tree
+organics_opttraintree <- prune(organics_traintree, cp=
+ organics_traintree$cptable[which.min(organics_traintree$cptable[,"xerror"]),"CP"])
+printcp(organics_opttraintree)
+plotcp(organics_opttraintree,upper="splits")
+
+rpart.plot(organics_opttraintree)
+#Build decision tree for test data
+organics_testtree <- rpart(TargetBuy~.,data = organics_test,method = "class")
+organics_testtree
+rpart.plot(organics_testtree)
+printcp(organics_testtree)
+plotcp(organics_testtree, upper = "splits")
+#Evaluate tree performance-using following functions
+### Test Model Performance - Creates a 2X2 confusion matrix and associated metrics
+testModelPerformance <- function(model, dataset, target, prediction) {
+  if(missing(prediction))
+  {
+    print("here")
+    dataset$pred <- predict(model, dataset, type = "class")
+  }
+else
+  {
+    print("here2")
+    dataset$pred <- prediction
+}
+  writeLines("PERFORMANCE EVALUATION FOR")
+  writeLines(paste("Model:", deparse(substitute(model))))
+  writeLines(paste("Target:", deparse(substitute(target))))
+  writeLines("\n\nConfusion Matrix:")
+  confMatrix <- table(Actual = target, Predicted = dataset$pred)
+  truePos <- confMatrix[2,2]
+  falseNeg <- confMatrix[2,1]
+  falsePos <- confMatrix[1,2]
+  trueNeg <- confMatrix[1,1]
+  print(confMatrix)
+  writeLines("\n\n")
+  accuracy <- (truePos + trueNeg)/(truePos + falseNeg + falsePos + trueNeg)
+  sensitivity <- truePos/(truePos + falseNeg)
+  specificity <- trueNeg/(falsePos + trueNeg)
+  falsePosRate <- falsePos/(falsePos + trueNeg)
+  falseNegRate <- falseNeg/(truePos + falseNeg)
+  precision <- truePos/(truePos + falsePos)
+  writeLines(paste("Accuracy:", round(accuracy, digits = 4)))
+  writeLines(paste("Sensitivity:", round(sensitivity, digits = 4)))
+  writeLines(paste("Specificity:", round(specificity, digits = 4)))
+  writeLines(paste("False Positive Rate:", round(falsePosRate, digits = 4)))
+  writeLines(paste("False Negative Rate:", round(falseNegRate, digits = 4)))
+  writeLines(paste("Precision:", round(precision, digits = 4)))
+dataset
+}
+
+### Log Likelihood - Computes log likelihood
+llh <- function(y, py) {
+  sum(y * log(py) + (1-y) * log(1-py))
+}
+#performance
+organics_train <- testModelPerformance(organics_traintree, organics_train,
+ organics_train$TargetBuy)
+organics_test <- testModelPerformance(organics_testtree, organics_test,
+ organics_test$TargetBuy)
+#Build logistic regression
+organics_test$pred <- NULL
+organics_train$pred <- NULL
+organics_test$logitpred <- NULL
+organics_train$logitpred <- NULL
+organics_test$probbuy <- NULL
+organics_train$probbuy<- NULL
+organicslogit <- glm(TargetBuy~., data=organics_train, family = binomial(link = "logit"))
+summary(organicslogit)
+organicslogit <- glm(TargetBuy~DemAffl+DemAge+DemGender+PromClass, data=organics_train,
+ family = binomial(link = "logit"))
+summary(organicslogit)
+confint.default(organicslogit) #Build confidence intervals
+exp(coef(organicslogit)) #Calculate odds ratio
+#Calculate Chi-Square
+devdiff <- with(organicslogit, null.deviance - deviance) #difference in deviance between
+ null and this model
+dofdiff <- with(organicslogit, df.null - df.residual) #difference in degrees of freedom
+ between null and this model
+pval <- pchisq(devdiff, dofdiff, lower.tail = FALSE )
+paste("Chi-Square: ", devdiff, " df: ", dofdiff, " p-value: ", pval)
+#Calculate psuedo R square
+organics_train$probbuy <- predict(organicslogit, newdata = organics_train, type =
+ "response")
+resid.dev <- 2 * llh(organics_train$TargetBuy, organics_train$probbuy)
+null.dev <- 2 * llh(organics_train$TargetBuy, mean(organics_train$TargetBuy))
+pr2 <- 1-(resid.dev/null.dev)
+paste("Psuedo R2: ", pr2)
+#Evaluate model performance
+#Convert probability in to a 0 or 1 prediction by rounding (cutoff = 0.5)
+head(organics_train)
+organics_train$logitpred <- round(organics_train$probbuy)
+head(organics_train)
+
+organics_test$probbuy <- predict(organicslogit, newdata = organics_test, type = "response")
+organics_test$logitpred <- round(organics_test$probbuy)
+organics_train <- testModelPerformance(organicslogit, organics_train,
+ organics_train$TargetBuy, organics_train$logitpred)
+organics_test <- testModelPerformance(organicslogit, organics_test,
+ organics_test$TargetBuy, organics_test$logitpred)
