@@ -1,0 +1,53 @@
+#Load data
+data(iris)
+#Examine the data
+str(iris)
+table(iris$Species)
+head(iris)
+#Randomize the data
+rand <- runif(nrow(iris)) # create 150 random numbers
+irisrand <- iris[order(rand), ]
+head(irisrand)
+#Partition the data
+iristrain <- irisrand[1:100, ]
+iristest <- irisrand[101:150, ]
+#Build decision tree
+iristree <- rpart(Species ~ ., data = iristrain, method = "class")
+iristree
+#node), split, n, loss, yval, (yprob)
+#node: node number
+#split: split rule
+#n: number of observations in this node
+#loss: number of misclassifications in this node
+#yval: predicted value of dependent variable in this node
+## replaced with the rpart.plot and it gives the identical thing
+rpart.plot(iristree)
+#fancyRpartPlot(iristree)
+#dependent variable prediction
+#percentage of observations in this node with each dependent value
+#percentage of observations in this node
+#test the performance of this model - dont use testModelPerformance function as this matrix
+ is 3x3
+#First look at train
+iristrain$pred <- predict(iristree, iristrain, type = "class") #create a prediction using
+our tree
+table(Actual = iristrain$Species, Predicted = iristrain$pred) #create a confusion matrix
+iristrain$correct <- iristrain$Species == iristrain$pred #create a new colum, TRUE if
+ predicted = actual, otherwise FALSE
+traincorrectcount <- length(which(iristrain$correct))
+trainincorrectcount <- nrow(iristrain) - traincorrectcount
+trainerrorrate <- trainincorrectcount/nrow(iristrain)
+trainaccuracy <- 1-trainerrorrate
+#Now look at test
+iristest$pred <- predict(iristree, iristest, type = "class") #create a prediction using our
+ tree
+table(Actual = iristest$Species, Predicted = iristest$pred) #create a confusion matrix
+iristest$correct <- iristest$Species == iristest$pred #create a new colum, TRUE if
+ predicted = actual, otherwise FALSE
+testcorrectcount <- length(which(iristest$correct))
+testincorrectcount <- nrow(iristest) - testcorrectcount
+testerrorrate <- testincorrectcount/nrow(iristest)
+testaccuracy <- 1-testerrorrate
+#Compare
+paste("TRAIN: Error Rate (", trainerrorrate, ") Accuracy (", trainaccuracy, ")")
+paste("TEST: Error Rate (", testerrorrate, ") Accuracy (", testaccuracy, ")")
