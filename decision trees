@@ -1,0 +1,17 @@
+set.seed(42)
+#Randomize data
+rand <- runif(nrow(organics))
+organics.rand <- organics[order(rand), ]
+#Partition data
+trainfrac <- 0.5
+sampleSizeTraining <- floor(trainfrac * nrow(organics))
+indicesTraining <- sort(sample(seq_len(nrow(organics)), size=sampleSizeTraining))
+indicesTest <- setdiff(seq_len(nrow(organics)), indicesTraining)
+organics_train <- organics[indicesTraining, ]
+organics_test <- organics[indicesTest, ]
+#Build decision tree
+organic_tree <- rpart(TargetBuy~.,data = organics,method = "class")
+organic_tree
+rpart.plot(organic_tree)
+printcp(organic_tree)
+plotcp(organic_tree)
