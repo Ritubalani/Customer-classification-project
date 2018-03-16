@@ -1,0 +1,80 @@
+#Load data
+titanic <- read.csv("kaggletitanic.csv")
+#Examine data
+str(titanic)
+titanic$PassengerId <- NULL
+titanic$Name <- NULL
+titanic$Ticket <- NULL
+titanic$Cabin <- NULL
+titanic$Embarked <- NULL
+str(titanic)
+describe(titanic)
+#Impute missing values
+agemodel <- lm(Age ~ Survived + Pclass + Title + Sex + SibSp + Parch + Fare, data =
+ titanic)
+summary(agemodel)
+agemodel <- lm(Age ~ Survived + Pclass + factor(as.character(Title), exclude = c('Col',
+ 'Lady', 'Major', 'Rev', 'Sir')) + SibSp, data = titanic)
+summary(agemodel)
+for(i in 1:nrow(titanic)){
+  if(is.na(titanic[i, "Age"])){
+    titanic[i, "Age"] = predict(agemodel, newdata = titanic[i, ])
+  }
+}
+describe(titanic$Age)
+#Randomize data
+rand <- runif(nrow(titanic))
+titanicrand <- titanic[order(rand), ]
+#Partition data
+titanictrain <- titanicrand[1:550, ]
+titanictest <- titanicrand[551:891, ]
+#Build decision tree
+titanictree <- rpart(Survived ~ ., data = titanictrain, method = "class")
+titanictree
+printcp(titanictree)
+plotcp(titanictree)
+#prune(titanictree, cp=
+ titanictree$cptable[which.min(titanictree$cptable[,"xerror"]),"CP"])
+## Replaced with rpart.plot and this is identical to the use of fancy plot in rattle
+rpart.plot(titanictree)
+#fancyRpartPlot(titanictree)
+#Evaluate tree performance
+titanictrain <- testModelPerformance(titanictree, titanictrain, titanictrain$Survived)
+titanictest <- testModelPerformance(titanictree, titanictest, titanictest$Survived)
+#Build logistic regression
+titanictrain$treepred <- NULL
+titanictrain$treepredcorrect <- NULL
+titaniclogit <- glm(Survived ~ Pclass + Title + Sex + Age + SibSp + Parch + Fare +
+ Pclass:Sex + Pclass:Age + SibSp:Sex + Parch:Sex, data = titanictrain, family =
+ binomial(link = "logit"))
+summary(titaniclogit)
+titaniclogit <- glm(Survived ~ Pclass + Sex + Age + SibSp + Pclass:Sex, data =
+ titanictrain, family = binomial(link = "logit"))
+summary(titaniclogit)
+confint.default(titaniclogit) #Build confidence intervals
+exp(coef(titaniclogit)) #Calculate odd sratio
+#Calculate Chi-Square
+devdiff <- with(titaniclogit, null.deviance - deviance) #difference in deviance between
+ null and this model
+dofdiff <- with(titaniclogit, df.null - df.residual) #difference in degrees of freedom
+ between null and this model
+pval <- pchisq(devdiff, dofdiff, lower.tail = FALSE )
+paste("Chi-Square: ", devdiff, " df: ", dofdiff, " p-value: ", pval)
+#Calculate psuedo R square
+titanictrain$probsurv <- predict(titaniclogit, newdata = titanictrain, type = "response")
+
+resid.dev <- 2 * llh(titanictrain$Survived, titanictrain$probsurv)
+null.dev <- 2 * llh(titanictrain$Survived, mean(titanictrain$Survived))
+pr2 <- 1-(resid.dev/null.dev)
+paste("Psuedo R2: ", pr2)
+#Evaluate model performance
+#Convert probability in to a 0 or 1 prediction by rounding (cutoff = 0.5)
+head(titanictrain)
+titanictrain$logitpred <- round(titanictrain$probsurv)
+head(titanictrain)
+titanictest$probsurv <- predict(titaniclogit, newdata = titanictest, type = "response")
+titanictest$logitpred <- round(titanictest$probsurv)
+titanictrain <- testModelPerformance(titaniclogit, titanictrain, titanictrain$Survived,
+ titanictrain$logitpred)
+titanictest <- testModelPerformance(titaniclogit, titanictest, titanictest$Survived,
+ titanictest$logitpred)
